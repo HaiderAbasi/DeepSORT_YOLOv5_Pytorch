@@ -64,7 +64,7 @@ class Track:
     """
 
     def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None):
+                 feature=None,det_class = None):
         #
         self.mean = mean
         self.covariance = covariance
@@ -80,6 +80,9 @@ class Track:
 
         self._n_init = n_init
         self._max_age = max_age
+        
+        self.det_class = det_class
+
 
     def to_tlwh(self):
         """Get current position in bounding box format `(top left x, top left y,
@@ -142,6 +145,9 @@ class Track:
 
         self.hits += 1
         self.time_since_update = 0
+        
+        self.det_class = detection.pred_class
+        
         if self.state == TrackState.Tentative and self.hits >= self._n_init:
             self.state = TrackState.Confirmed
 

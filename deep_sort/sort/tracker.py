@@ -68,18 +68,16 @@ class Tracker:
             each Detection obj maintain the location(bbox_tlwh), confidence(conf), and appearance feature
         """
         # Run matching cascade.
-        matches, unmatched_tracks, unmatched_detections = \
-            self._match(detections)
+        matches, unmatched_tracks, unmatched_detections = self._match(detections)
 
         # Update track set.
         for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(
-                self.kf, detections[detection_idx])
+            self.tracks[track_idx].update(self.kf, detections[detection_idx])
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
         for detection_idx in unmatched_detections:
-            #
             self._initiate_track(detections[detection_idx])
+   
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
         # Update distance metric.
@@ -95,15 +93,18 @@ class Tracker:
             np.asarray(features), np.asarray(targets), active_targets)
 
     def _match(self, detections):
-        # 基于外观信息和马氏距离，计算卡尔曼滤波预测的tracks和当前时刻检测到的detections的代价矩阵
+        # Compute cost matrix between predicted tracks and current detections based on
+        # appearance information and Mahalanobis distance
         def gated_metric(tracks, dets, track_indices, detection_indices):
+            # Extract features of current detections
             features = np.array([dets[i].feature for i in detection_indices])
+            # Extract track IDs of predicted tracks
             targets = np.array([tracks[i].track_id for i in track_indices])
 
-            # 基于外观信息，计算tracks和detections的余弦距离代价矩阵
+            # Compute cost matrix between predicted tracks and current detections based on cosine distance of appearance information
             cost_matrix = self.metric.distance(features, targets)
 
-            # 基于马氏距离，过滤掉代价矩阵中一些不合适的项 (将其设置为一个较大的值)
+            # Filter out inappropriate entries in the cost matrix based on Mahalanobis distance
             cost_matrix = linear_assignment.gate_cost_matrix(
                 self.kf, cost_matrix, tracks, dets, track_indices,
                 detection_indices)
@@ -159,5 +160,5 @@ class Tracker:
 
         self.tracks.append(Track(
             mean, covariance, self._next_id, self.n_init, self.max_age,
-            detection.feature)) # for new obj, create a new Track object for it
+            detection.feature,detection.pred_class)) # for new obj, create a new Track object for it
         self._next_id += 1

@@ -56,7 +56,6 @@ class VideoTracker(object):
 
         # ***************************** initialize YOLO-V5 **********************************
         self.detector = torch.load(args.weights, map_location=self.device)['model'].float()  # load to FP32
-        #self.detector = torch.hub.load('src/c__Advanced/Tracking\DeepSORT_YOLOv5/yolov5/weights/yolov5s.pt','yolov5s',force_reload= True)
 
         self.detector.to(self.device).eval()
         if self.half:
@@ -134,12 +133,16 @@ class VideoTracker(object):
             # post-processing ***************************************************************
             # visualize bbox  ********************************
             if len(outputs) > 0:
+                # (#obj, 6) (x1,y1,x2,y2,ID,Class)
                 bbox_xyxy = outputs[:, :4]
-                identities = outputs[:, -1]
+                identities = outputs[:, -2] # Second last is TrackID
+                t_classes = outputs[:, -1] # Last is Class
+                
                 img0 = draw_boxes(img0, bbox_xyxy, identities)  # BGR
-
+                                    
                 # add FPS information on output video
-                text_scale = max(1, img0.shape[1] // 1600)
+                text_scale = max(1, img0.shape[1] // 1000)
+
                 cv2.putText(img0, 'frame: %d fps: %.2f ' % (idx_frame, len(avg_fps) / sum(avg_fps)),
                         (20, 20 + text_scale), cv2.FONT_HERSHEY_PLAIN, text_scale, (0, 0, 255), thickness=2)
 
@@ -157,8 +160,8 @@ class VideoTracker(object):
             if self.args.save_txt:
                 with open(self.args.save_txt + str(idx_frame).zfill(4) + '.txt', 'a') as f:
                     for i in range(len(outputs)):
-                        x1, y1, x2, y2, idx = outputs[i]
-                        f.write('{}\t{}\t{}\t{}\t{}\n'.format(x1, y1, x2, y2, idx))
+                        x1, y1, x2, y2, idx,class_id = outputs[i]
+                        f.write('{}\t{}\t{}\t{}\t{}\t{}\n'.format(x1, y1, x2, y2, idx, class_id))
 
 
 
@@ -214,12 +217,13 @@ class VideoTracker(object):
 
             bbox_xywh = xyxy2xywh(det[:, :4]).cpu()
             confs = det[:, 4:5].cpu()
+            classes = det[:, 5:6].cpu()
 
             # ****************************** deepsort ****************************
-            outputs = self.deepsort.update(bbox_xywh, confs, im0)
-            # (#ID, 5) x1,y1,x2,y2,track_ID
+            outputs = self.deepsort.update(bbox_xywh, confs, classes, im0)
+            # (#ID, 6) x1,y1,x2,y2,track_ID,Class
         else:
-            outputs = torch.zeros((0, 5))
+            outputs = torch.zeros((0, 6)) # Expecting 6 things now (Class included)
 
         t3 = time.time()
         return outputs, t2-t1, t3-t2
@@ -229,7 +233,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     # input and output
-    #parser.add_argument('--input_path', type=str, default='input_480.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--input_path', type=str, default=r'input/surveillance.webm', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--save_path', type=str, default='output/', help='output folder')  # output folder
     parser.add_argument("--frame_interval", type=int, default=2)
@@ -238,8 +241,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_txt', default='output/predict/', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
 
     # camera only
-    #parser.add_argument("--display", action="store_true")
-    parser.add_argument("--display", default=True)
+    parser.add_argument("--display", action="store_true")
     parser.add_argument("--display_width", type=int, default=800)
     parser.add_argument("--display_height", type=int, default=600)
     parser.add_argument("--camera", action="store", dest="cam", type=int, default="-1")
@@ -258,7 +260,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args.img_size = check_img_size(args.img_size)
-    print(args)
 
     with VideoTracker(args) as vdo_trk:
         vdo_trk.run()
