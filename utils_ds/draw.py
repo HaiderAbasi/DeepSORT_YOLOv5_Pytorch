@@ -67,7 +67,7 @@ def draw_boxes(img, bbox, identities=None, offset=(0,0),mask = None, trajectorie
         draw_trajectory = True
         if id_to_track and id == id_to_track:
             color = (0,255,0)
-            write_to_csv("john_doe.csv",box,t_classes[id])
+            write_to_csv("john_doe.csv",box,t_classes[i])
         elif id_to_track:
             color = (0,0,40)
             bbox_thickness = 1
