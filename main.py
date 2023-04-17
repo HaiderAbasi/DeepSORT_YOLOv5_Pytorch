@@ -3,7 +3,7 @@ from yolov5.utils.torch_utils import select_device, time_synchronized
 from yolov5.utils.datasets import letterbox
 
 from utils_ds.parser import get_config
-from utils_ds.draw import draw_boxes
+from utils_ds.draw import draw_boxes_m,count_vehicles,find_keys_not_in_dict
 from deep_sort import build_tracker
 
 import argparse
@@ -16,6 +16,9 @@ import torch
 import torch.backends.cudnn as cudnn
 
 import sys
+
+from utilities import euc_dist,find_centroid
+
 
 currentUrl = os.path.dirname(__file__)
 sys.path.append(os.path.abspath(os.path.join(currentUrl, 'yolov5')))
@@ -93,8 +96,10 @@ class VideoTracker(object):
 
             # create video writer
             fourcc = cv2.VideoWriter_fourcc(*self.args.fourcc)
+            # self.writer = cv2.VideoWriter(self.save_video_path, fourcc,
+            #                               self.vdo.get(cv2.CAP_PROP_FPS), (self.im_width, self.im_height))
             self.writer = cv2.VideoWriter(self.save_video_path, fourcc,
-                                          self.vdo.get(cv2.CAP_PROP_FPS), (self.im_width, self.im_height))
+                                          30, (self.im_width, self.im_height))
             print('Done. Create output file ', self.save_video_path)
 
         if self.args.save_txt:
@@ -114,6 +119,18 @@ class VideoTracker(object):
 
         idx_frame = 0
         last_out = None
+        
+        # Initialize the counter
+        total_cars_passed = 0
+
+        # Initialize the previous car positions dictionary
+        tracking = {}
+        tracked = {}
+        distance_travelled = {}
+
+        max_dim = max(self.im_width,self.im_height)
+        # Define the distance threshold for car movement
+        distance_threshold = max_dim/20
         while self.vdo.grab():
             # Inference *********************************************************************
             t0 = time.time()
@@ -130,6 +147,8 @@ class VideoTracker(object):
             t1 = time.time()
             avg_fps.append(t1 - t0)
 
+            # ######################################  Traffic-Monitoring ***************************************************************
+
             # post-processing ***************************************************************
             # visualize bbox  ********************************
             if len(outputs) > 0:
@@ -138,13 +157,61 @@ class VideoTracker(object):
                 identities = outputs[:, -2] # Second last is TrackID
                 t_classes = outputs[:, -1] # Last is Class
                 
-                img0 = draw_boxes(img0, bbox_xyxy, identities)  # BGR
+                img0 = draw_boxes_m(img0, bbox_xyxy, identities)  # BGR
                                     
                 # add FPS information on output video
                 text_scale = max(1, img0.shape[1] // 1000)
 
                 cv2.putText(img0, 'frame: %d fps: %.2f ' % (idx_frame, len(avg_fps) / sum(avg_fps)),
                         (20, 20 + text_scale), cv2.FONT_HERSHEY_PLAIN, text_scale, (0, 0, 255), thickness=2)
+
+                # Start with identifying those cars that was being tracked and are now not no longer in current
+                # cars
+                # Do this by seeing which of the tracking list are not found in current tracked cars or previously tracked cars,
+                lost_track = find_keys_not_in_dict(tracking,identities,tracked)
+                if len(lost_track) != 0:
+                    for key in lost_track:
+                        distance_covered = distance_travelled[key]
+                        # So we have the initial position of the car.
+                        # We want to find its curent position but that is not possible as we have lost track
+                        # Either we store its last positon or
+                        # We store the create a dictionary where for each tracked car we store its max distance
+                        # Travelled.
+                        # Once it enters leaves tracking and enters tracked cars, we would need to delete 
+                        # it from distace travelled too.
+                        #curr_pos = find_centroid(bbox,"ltrd")
+                        #distance = euc_dist(init_pos, curr_pos)
+                                                # Check if the car has moved considerably
+                        if distance_covered > distance_threshold:
+                            # Check if the car is no longer detected in the current frame
+                            # Increment the counter and remove the car from the previous positions dictionary
+                            total_cars_passed += 1
+                            # delete car information from tracking and distance travelled and add to tracked
+                            del tracking[key]
+                            del distance_travelled[key]
+                            tracked[key] = distance
+                
+                        
+                # Loop over the tracked cars
+                for idx, car_id in enumerate(identities):
+                    bbox = bbox_xyxy[idx]
+                    # Check if the car was tracked in the previous frame
+                    if car_id in tracking:
+                        # Compute the distance between the previous and current positions
+                        init_pos = tracking[car_id]
+                        curr_pos = find_centroid(bbox,"ltrd")
+                        distance = euc_dist(init_pos, curr_pos)
+                        distance_travelled[car_id] = distance
+                    elif car_id not in tracking or tracked:
+                        # Not already tracked, Adding initial position to tracking dictionary.
+                        init_pos = find_centroid(bbox,"ltrd")
+                        tracking[car_id] = init_pos
+                        distance_travelled[car_id] = 0
+                    
+            count_vehicles(img0,total_cars_passed)
+
+            # ######################################  Traffic-Monitoring ***************************************************************
+
 
             # display on window ******************************
             if self.args.display:
@@ -233,7 +300,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     # input and output
-    parser.add_argument('--input_path', type=str, default=r'input/surveillance.webm', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--input_path', type=str, default=r'input\a.mkv', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--save_path', type=str, default='output/', help='output folder')  # output folder
     parser.add_argument("--frame_interval", type=int, default=2)
     parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
@@ -247,11 +314,11 @@ if __name__ == '__main__':
     parser.add_argument("--camera", action="store", dest="cam", type=int, default="-1")
 
     # YOLO-V5 parameters
-    parser.add_argument('--weights', type=str, default='yolov5/weights/yolov5m.pt', help='model.pt path')
+    parser.add_argument('--weights', type=str, default='yolov5/weights/yolov5s.pt', help='model.pt path')
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.4, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
-    parser.add_argument('--classes', nargs='+', type=int, default=[0], help='filter by class')
+    parser.add_argument('--classes', nargs='+', type=int, default=[2], help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
 

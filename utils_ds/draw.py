@@ -4,8 +4,21 @@ import csv
 import datetime
 import atexit
 import os
+from traffic_monitoring.color_recognition_module import color_recognition_api
+from traffic_monitoring.speed_and_direction_prediction_module import speed_camera
+
+from utilities import find_centroid
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
+
+# setup line coordinates
+limitsDown = [612, 1056, 1350, 1000] # down line coordinates [x1, y1, x2, y2]
+limitsUp = [1440, 928, 1850, 876] # up line coordinates [x1, y1, x2, y2]
+
+
+speed_line_queue = {}
+data_deque = {}
+
 
 def write_to_csv(file_path, bbox, class_name):
     # Create header if file is new
@@ -51,6 +64,102 @@ def inc_int(color,factor = 1.4):
     new_r = r*factor if r*factor < 255 else 255
     return (new_b,new_g,new_r)
 
+def find_keys_not_in_dict(a, b, c):
+    if type(a) == dict:
+        # handle dictionary case
+        a_keys = set(a.keys())
+    else:
+        a_keys = set(a)
+    if type(b) == dict:
+        b_keys = set(b.keys())
+    else:
+        b_keys = set(b)
+    if type(c) == dict:
+        c_keys = set(c.keys())
+    else:
+        c_keys = set(c)
+
+    # Find keys that are in a but not in b or c
+    result = list(a_keys - (b_keys | c_keys))
+
+    return result
+
+def count_vehicles(img, counter_num):
+
+    # Get the size of the image
+    height, width, _ = img.shape
+
+    # Define the font and size of the counter
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = height / 1000.0
+
+    # Define the position of the counter
+    text = "Cars entered: "+ str(counter_num)
+    text_size, _ = cv2.getTextSize(text, font, font_scale, thickness=1)
+    x_pos = int(width - text_size[0] - 10)
+    y_pos = int(text_size[1] + 10)
+    # Create a black rectangle behind the text
+    cv2.rectangle(img, (x_pos, y_pos - text_size[1]), (width, y_pos + 10), (0, 0, 0), -1)
+
+    # Draw the counter on the image
+    cv2.putText(img, text, (x_pos, y_pos), font, font_scale, (40, 255, 40), thickness=2)
+
+def draw_arrow(image, direction, start_point):
+    color = (0, 0, 255)  # red color
+    thickness = 4
+    length = 100
+    if direction == 'left':
+        end_point = (start_point[0] - length, start_point[1])
+        cv2.arrowedLine(image, start_point, end_point, color, thickness)
+    elif direction == 'right':
+        end_point = (start_point[0] + length, start_point[1])
+        cv2.arrowedLine(image, start_point, end_point, color, thickness)
+        
+        
+def draw_boxes_m(img, bbox, identities=None, offset=(0,0)):
+    # draw a line and text indicating the "up" direction
+    cv2.line(img,(limitsUp[0],limitsUp[1]),(limitsUp[2],limitsUp[3]),(0,255,0),5)
+    cv2.putText(img,"up",(limitsUp[0],limitsUp[1]-15),cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+
+    # Removing Vehicles from data_deque that are no longer tracked
+    for key in list(data_deque):
+      if key not in identities:
+        data_deque.pop(key)
+    
+    for i,box in enumerate(bbox):
+        x1,y1,x2,y2 = [int(i) for i in box]
+        x1 += offset[0]
+        x2 += offset[0]
+        y1 += offset[1]
+        y2 += offset[1]
+        # box text and bar
+        id = int(identities[i]) if identities is not None else 0
+        ##
+        color = compute_color_for_labels(id)
+
+        # bbox = [left , top, right, down]
+        detected_vehicle_image = img[int(box[1]):int(box[3]), int(box[0]):int(box[2])]
+        predicted_color = color_recognition_api.color_recognition(detected_vehicle_image)
+        
+        
+        #label = '{}{:d}'.format("", id) + predicted_color + "car"
+        label = '{}{:d}'.format("", id)
+
+        # ==========================================Speed Prediciton========================================
+
+        predicted_speed = speed_camera.predict_speed(img,box,id,data_deque,speed_line_queue,label,color)
+
+        # ==================================================================================================
+        #draw_arrow(img,predicted_direction,find_centroid(box))
+        ##
+
+        label = label + f" {predicted_color} car - {predicted_speed} km/h"
+        t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2 , 2)[0]
+        cv2.rectangle(img,(x1, y1),(x2,y2),color,3)
+        cv2.rectangle(img,(x1, y1),(x1+t_size[0]+3,y1+t_size[1]+4), color,-1)
+        cv2.putText(img,label,(x1,y1+t_size[1]+4), cv2.FONT_HERSHEY_PLAIN, 2, [255,255,255], 2)
+    return img
+
 
 def draw_boxes(img, bbox, identities=None, offset=(0,0),mask = None, trajectories = None,id_to_track = None,t_classes = None,categories = None):
     for i,box in enumerate(bbox):
@@ -86,7 +195,7 @@ def draw_boxes(img, bbox, identities=None, offset=(0,0),mask = None, trajectorie
         cv2.rectangle(img,(x1, y1),(x1+t_size[0]+3,y1+t_size[1]+4), color,-1)
         cv2.putText(img,label,(x1,y1+t_size[1]+4), cv2.FONT_HERSHEY_PLAIN, label_fscale, [255,255,255], 2)
         
-        if draw_trajectory and len(trajectories[id])==2:
+        if draw_trajectory and trajectories is not None and len(trajectories[id])==2:
             cv2.line(mask,trajectories[id][0],trajectories[id][1],inc_int(color),3)
         img = overlay_on_image(img,mask)
         

@@ -2,6 +2,40 @@ import cv2
 import numpy as np
 import random
 from collections import deque
+import math
+
+
+def find_centroid(bbox, bbox_type="ltrd"):
+    """
+    This function computes the centroid of a bounding box given its coordinates in ltrd or ltwh format.
+
+    Parameters:
+    bbox (tuple): A tuple of 4 values (x1, y1, x2, y2) or 3 values (x, y, w, h) that define the bounding box coordinates.
+    bbox_type (str, optional): The type of bounding box, default is "ltrd".
+
+    Returns:
+    tuple: A tuple of 2 values (x_center, y_center) representing the x and y coordinates of the centroid.
+
+    Raises:
+    ValueError: If an unsupported bounding box type is provided.
+    """
+    if bbox_type == "ltrd":
+        x1, y1, x2, y2 = bbox
+        x_center = (x1 + x2) / 2
+        y_center = (y1 + y2) / 2
+        return (int(x_center), int(y_center))
+    elif bbox_type == "ltwh":
+        x, y, w, h = bbox
+        x_center = x + w / 2
+        y_center = y + h / 2
+        return (int(x_center), int(y_center))
+    else:
+        raise ValueError("[Unsupported bbox_type]: Please provide an 'ltrd' or 'ltwh' bbox!")
+
+def euc_dist(a,b):
+    return math.sqrt( ( (a[1]-b[1])**2 ) + ( (a[0]-b[0])**2 ) )
+
+
 
 # Overload puttext function to add text any of the four corner in image
 def putText(img, text, font=cv2.FONT_HERSHEY_PLAIN, font_scale=1, color=(0, 0, 255), thickness=1, margin=10, pos='top-right', bg_color=None):
