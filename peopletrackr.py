@@ -307,6 +307,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args.img_size = check_img_size(args.img_size)
+    args.display = True
 
     with VideoTracker(args) as vdo_trk:
         vdo_trk.run()

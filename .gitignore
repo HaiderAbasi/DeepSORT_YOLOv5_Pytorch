@@ -112,3 +112,5 @@ ENV/
 .idea
 
 john_doe.csv
+input/MOT20-02-raw.webm
+input/MOT20-06-raw.webm
